@@ -7,6 +7,15 @@ namespace SecureLab.Api.Application.Incidents;
 
 public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<IncidentQueries> logger)
 {
+        private static readonly IReadOnlyDictionary<IncidentSeverity, int>
+        SeverityOrder = new Dictionary<IncidentSeverity, int>
+        {
+            [IncidentSeverity.Critical] = 0,
+            [IncidentSeverity.High] = 1,
+            [IncidentSeverity.Medium] = 2,
+            [IncidentSeverity.Low] = 3,
+        };
+
     public async Task<IReadOnlyList<IncidentListItemResponse>> GetListAsync(
         IncidentStatus? status,
         CancellationToken cancellationToken)
@@ -58,4 +67,39 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                     .ToList()))
             .SingleOrDefaultAsync(cancellationToken);
     }
+        public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>>
+        GetSeveritySummaryAsync(
+            IncidentStatus? status,
+            CancellationToken cancellationToken)
+    {
+        var query = dbContext.Incidents.AsNoTracking();
+ 
+        if (status is not null)
+        {
+            query = query.Where(incident => incident.Status == status);
+        }
+ 
+// 1. Завантажуємо наявні групи з бази у словник
+    var dbGroups = await query
+        .GroupBy(incident => incident.Severity)
+        .Select(group => new
+        {
+            Severity = group.Key,
+            Count = group.Count(),
+        })
+        .ToDictionaryAsync(group => group.Severity, group => group.Count, cancellationToken);
+
+    logger.LogInformation(
+        "Severity summary produced {GroupCount} DB groups",
+        dbGroups.Count);
+
+    // 2. Проходимо по всіх enum-значеннях і підставляємо 0 для відсутніх
+    return Enum.GetValues<IncidentSeverity>()
+        .OrderBy(severity => SeverityOrder[severity])
+        .Select(severity => new IncidentSeveritySummaryResponse(
+            severity.ToString(),
+            dbGroups.GetValueOrDefault(severity, 0)))
+        .ToList();
+    }
+
 }
