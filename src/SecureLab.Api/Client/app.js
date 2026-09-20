@@ -108,4 +108,47 @@ filterForm.addEventListener("submit", (event) => {
   loadIncidents();
 });
 
+const summaryButton = document.querySelector("#summary-button");
+const summaryStatusElement = document.querySelector("#summary-status");
+const summaryListElement = document.querySelector("#summary-list");
+ 
+async function loadSeveritySummary() {
+  summaryStatusElement.textContent = "Завантаження…";
+  summaryListElement.replaceChildren();
+
+  try {
+    // Зчитуємо поточне значення з випадаючого списку продуктів/статусів
+    const statusSelect = document.querySelector("#status-filter") || document.querySelector("select");
+    const status = statusSelect ? statusSelect.value : "";
+    
+    // Якщо вибрано конкретний статус — додаємо параметр ?status=...
+    const url = status 
+      ? `/api/incidents/severity-summary?status=${encodeURIComponent(status)}`
+      : "/api/incidents/severity-summary";
+
+    const summary = await apiFetch(url);
+
+// Перевіряємо, чи масив порожній АБО чи у всіх груп count дорівнює 0
+const totalIncidents = summary.reduce((acc, item) => acc + item.count, 0);
+
+if (summary.length === 0 || totalIncidents === 0) {
+  summaryStatusElement.textContent = "Даних немає.";
+  return;
+}
+
+    summaryStatusElement.textContent = `Груп: ${summary.length}`;
+    for (const item of summary) {
+      const listItem = document.createElement("li");
+      listItem.textContent = `${item.severity}: ${item.count}`;
+      summaryListElement.append(listItem);
+    }
+  } catch (error) {
+    summaryStatusElement.textContent = "Не вдалося завантажити підсумок. Спробуйте пізніше.";
+  }
+}
+ 
+summaryButton.addEventListener("click", loadSeveritySummary);
+
+
 loadIncidents();
+

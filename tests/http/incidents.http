@@ -25,6 +25,16 @@ Accept: application/json
 GET {{host}}/api/incidents?status=Unknown
 Accept: application/json
 
-### Lab 1 extension point: expected 501 before student implementation
+### Severity summary: expected 200 with existing groups
 GET {{host}}/api/incidents/severity-summary
+Accept: application/json
+ 
+### Severity summary filtered to a status with no incidents:
+### expected 200 with empty array
+GET {{host}}/api/incidents/severity-summary?status=Resolved
+Accept: application/json
+ 
+### Severity summary with invalid status:
+### expected 400 Validation Problem Details
+GET {{host}}/api/incidents/severity-summary?status=Unknown
 Accept: application/json
