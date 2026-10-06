@@ -9,22 +9,64 @@ public static class Lab02Endpoints
 {
     public static void MapLab02Endpoints(this WebApplication app)
     {
-        app.MapGet("/api/incidents/search", async (string? q, string? sortBy, SecureLabDbContext db, CancellationToken ct) =>
+
+
+
+
+    app.MapGet("/api/incidents/search", async (
+        string? q,
+        string? sortBy,
+        SecureLabDbContext db,
+        CancellationToken ct) =>
+    {
+        if (sortBy is not (null or "" or "createdAtUtc" or "severity" or "status"))
         {
-            var order = sortBy switch
-            {
-                null or "" or "createdAtUtc" => "created_at_utc DESC",
-                "severity" => "severity", "status" => "status", _ => sortBy
-            };
-            var sql = "SELECT * FROM incidents WHERE title ILIKE '%" + (q ?? "")
-                + "%' OR description ILIKE '%" + (q ?? "") + "%' ORDER BY " + order + " LIMIT 50";
-            var rows = await db.Incidents.FromSqlRaw(sql).AsNoTracking().ToListAsync(ct);
-            return Results.Ok(rows.Select(row => new
-            {
-                row.Id, row.Title, row.Description,
-                Severity = row.Severity.ToString(), Status = row.Status.ToString(), row.CreatedAtUtc
-            }));
-        });
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]>
+                {
+                    ["sortBy"] =
+                        ["Допустимі значення: createdAtUtc, severity, status."]
+                });
+        }
+
+        // Екрануємо спеціальні символи шаблону пошуку.
+        var searchText = (q ?? "")
+            .Replace("\\", "\\\\")
+            .Replace("%", "\\%")
+            .Replace("_", "\\_");
+
+        var pattern = $"%{searchText}%";
+
+        var query = db.Incidents
+            .AsNoTracking()
+            .Where(row =>
+                EF.Functions.ILike(row.Title, pattern, "\\")
+                || EF.Functions.ILike(row.Description, pattern, "\\"));
+
+        var sortedQuery = sortBy switch
+        {
+            "severity" => query.OrderBy(row => row.Severity),
+            "status" => query.OrderBy(row => row.Status),
+            _ => query.OrderByDescending(row => row.CreatedAtUtc)
+        };
+
+        var rows = await sortedQuery
+            .Take(50)
+            .ToListAsync(ct);
+
+        return Results.Ok(rows.Select(row => new
+        {
+            row.Id,
+            row.Title,
+            row.Description,
+            Severity = row.Severity.ToString(),
+            Status = row.Status.ToString(),
+            row.CreatedAtUtc
+        }));
+    });
+
+
+
         app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, CancellationToken ct) =>
         {
             // ЛР 02: доповніть server validation, business rules та response contract.
