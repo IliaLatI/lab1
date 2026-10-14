@@ -1,7 +1,33 @@
 <!doctype html>
 <html lang="uk"><meta charset="utf-8"><title>ЛР 03 — сеанс</title>
 <h1>Навчальний сеанс</h1>
+
+
+<h2>Реєстрація користувача</h2>
+<form id="register"><label>Ім’я <input name="userName" required></label>
+<label>Email <input name="email" type="email" required></label>
+<label>Відображуване ім’я <input name="displayName" required></label>
+<label>Пароль <input name="password" type="password" autocomplete="new-password" required></label>
+<button>Зареєструватися</button></form>
+<h2>Вхід до системи</h2>
+
+
 <form id="login"><label>Ім’я <input name="userName" autocomplete="username" required></label>
 <label>Пароль <input name="password" type="password" autocomplete="current-password" required></label><button>Увійти</button></form>
-<button id="me">Мій профіль</button><button id="logout">Вийти</button><pre id="result"></pre>
+<button id="me">Мій профіль</button><button id="logout">Вийти</button>
+<p id="session-state">Стан: перевіряємо...</p>
+<pre id="result"></pre><pre id="profile-result"></pre>
+
+<h2>Створення інциденту</h2>
+<form id="incident"><label>Назва <input name="title" maxlength="160" required></label>
+<label>Опис <input name="description" maxlength="4000" required></label>
+<label>Важливість <select name="severity">
+<option value="Low">Low</option><option value="Medium">Medium</option>
+<option value="High">High</option><option value="Critical">Critical</option>
+</select></label>
+<label>Дата та час <input name="occurredAtUtc" type="datetime-local" required></label>
+<button>Створити інцидент</button></form>
+<pre id="incident-result"></pre>
+
+
 <script src="auth-lab.js" defer></script></html>

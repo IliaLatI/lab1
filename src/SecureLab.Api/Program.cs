@@ -5,6 +5,8 @@ using SecureLab.Api.Application.Incidents;
 using SecureLab.Api.Data;
 using SecureLab.Api.Presentation.Endpoints;
 
+using System.Threading.RateLimiting;
+
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -22,6 +24,36 @@ builder.Services.AddDbContext<SecureLabDbContext>(options =>
 builder.Services.AddScoped<IncidentQueries>();
 
 builder.AddLab03Identity();
+
+// Обмеження повторних спроб входу.
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    // Іменована політика для входу користувачів.
+    options.AddPolicy("auth-login", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString()
+                ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromSeconds(30),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+
+    // Безпечна відповідь після перевищення ліміту.
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        await Results.Problem(
+            title: "Too many login attempts",
+            statusCode: StatusCodes.Status429TooManyRequests
+        ).ExecuteAsync(context.HttpContext);
+    };
+});
+
 
 var app = builder.Build();
 
@@ -49,8 +81,10 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
+app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();

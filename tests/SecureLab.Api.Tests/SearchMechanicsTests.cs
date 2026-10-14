@@ -30,9 +30,16 @@ public sealed class SearchMechanicsTests(SecureLabApiFactory factory)
         string severity,
         HttpStatusCode expected)
     {
-        using var client = factory.CreateClient();
+        // Отримуємо локальний навчальний пароль.
+        var password = Environment.GetEnvironmentVariable("SeedUsers__Password")
+            ?? throw new InvalidOperationException(
+                "Set local SeedUsers__Password outside Git.");
+
+        // Авторизуємося як Alice та отримуємо cookie-клієнт.
+        using var client = await factory.LoginAsync("alice", password);
 
         var request = new
+        
         {
             title = $"Test-{Guid.NewGuid():N}",
             description = "Навчальна перевірка створення інциденту.",

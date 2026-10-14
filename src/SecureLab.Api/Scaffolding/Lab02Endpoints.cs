@@ -2,6 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 
+using System.Security.Claims;
+
+
 namespace SecureLab.Api.Scaffolding;
 
 // Навчальний старт ЛР 02. Запускати лише з локальними штучними даними.
@@ -67,7 +70,13 @@ public static class Lab02Endpoints
 
 
 
-        app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, CancellationToken ct) =>
+        app.MapPost("/api/incidents", async (
+        CreateIncidentRequest request,
+        SecureLabDbContext db,
+        HttpContext httpContext,
+        CancellationToken ct) =>
+
+
         {
             // ЛР 02: доповніть server validation, business rules та response contract.
             var now = DateTimeOffset.UtcNow;
@@ -143,16 +152,36 @@ public static class Lab02Endpoints
                     detail: "Активний інцидент із таким title уже існує.");
             } 
 
+
+
+
+        
+            // Отримуємо ID авторизованого користувача.
+            var userId = httpContext.User.FindFirst(
+                ClaimTypes.NameIdentifier)?.Value;
+
+            // Перевіряємо, чи є ID правильним Guid.
+            if (!Guid.TryParse(userId, out var verifiedUserId))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            // Створюємо інцидент із перевіреним власником.
             var incident = new Incident
             {
-                Id = Guid.NewGuid(), OwnerUserId = DbSeeder.AliceId,
+                Id = Guid.NewGuid(),
+                OwnerUserId = verifiedUserId,
                 Title = title!,
+
                 Description = description!,
                 Severity = severity,
                 Status = IncidentStatus.New,
                 OccurredAtUtc = request.OccurredAtUtc!.Value.ToUniversalTime(),
                 CreatedAtUtc = now, UpdatedAtUtc = now
             };
+
+
             db.Incidents.Add(incident);
             await db.SaveChangesAsync(ct);
             var response = new CreatedIncidentResponse(
@@ -167,7 +196,7 @@ public static class Lab02Endpoints
             return Results.Created(
                 $"/api/incidents/{incident.Id}",
                 response);
-      });
+      }).RequireAuthorization();
     }
 }
 
