@@ -1,4 +1,8 @@
+
+using Microsoft.EntityFrameworkCore;
+using SecureLab.Api.Application.Authorization;
 using SecureLab.Api.Application.Incidents;
+using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
 
@@ -6,10 +10,12 @@ namespace SecureLab.Api.Presentation.Endpoints;
 
 public static class IncidentEndpoints
 {
-    public static IEndpointRouteBuilder MapIncidentEndpoints(this IEndpointRouteBuilder endpoints)
+    public static IEndpointRouteBuilder MapIncidentEndpoints(
+        this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/incidents")
-            .WithTags("Incidents");
+            .WithTags("Incidents")
+            .RequireAuthorization();
 
         group.MapGet("/", GetListAsync)
             .WithName("GetIncidents")
@@ -19,13 +25,13 @@ public static class IncidentEndpoints
         group.MapGet("/{id:guid}", GetDetailsAsync)
             .WithName("GetIncidentDetails")
             .Produces<IncidentDetailsResponse>()
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
         group.MapGet("/severity-summary", GetSeveritySummaryAsync)
             .WithName("GetIncidentSeveritySummary")
             .Produces<IReadOnlyList<IncidentSeveritySummaryResponse>>()
             .ProducesValidationProblem();
-
 
         return endpoints;
     }
@@ -33,51 +39,108 @@ public static class IncidentEndpoints
     private static async Task<IResult> GetListAsync(
         string? status,
         IncidentQueries queries,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
+        // Перевірка дозволу на перегляд списку.
+        if (!IncidentAccess.CanList(context.User))
+        {
+            return Results.Problem(
+                title: "Forbidden",
+                statusCode: 403);
+        }
+
         IncidentStatus? parsedStatus = null;
+
         if (status is not null)
         {
-            if (!Enum.TryParse<IncidentStatus>(status, ignoreCase: true, out var candidate)
+            if (!Enum.TryParse<IncidentStatus>(
+                    status, ignoreCase: true, out var candidate)
                 || !Enum.IsDefined(candidate))
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    ["status"] = ["Допустимі значення: New, Triaged, InProgress, Resolved, Closed."]
-                });
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["status"] =
+                        [
+                            "Допустимі значення: New, Triaged, InProgress, Resolved, Closed."
+                        ]
+                    });
             }
 
             parsedStatus = candidate;
         }
 
-        return Results.Ok(await queries.GetListAsync(parsedStatus, cancellationToken));
+        // Список уже фільтрується за користувачем у IncidentQueries.
+        var incidents = await queries.GetListAsync(
+            parsedStatus,
+            context.User,
+            cancellationToken);
+
+        return Results.Ok(incidents);
     }
 
     private static async Task<IResult> GetDetailsAsync(
         Guid id,
         IncidentQueries queries,
+        SecureLabDbContext db,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
-        var incident = await queries.GetDetailsAsync(id, cancellationToken);
-        return incident is null
-            ? Results.Problem(
+        // Перевіряємо існування інциденту.
+        var incident = await db.Incidents
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                x => x.Id == id,
+                cancellationToken);
+
+        if (incident is null)
+        {
+            return Results.Problem(
                 title: "Інцидент не знайдено",
-                detail: $"Інцидент '{id}' не існує.",
-                statusCode: StatusCodes.Status404NotFound)
-            : Results.Ok(incident);
+                statusCode: 404);
+        }
+
+        // Перевіряємо право читання конкретного інциденту.
+        if (!IncidentAccess.Allows(
+                context.User,
+                IncidentOperation.Read,
+                incident))
+        {
+            return Results.Problem(
+                title: "Forbidden",
+                statusCode: 403);
+        }
+
+        // Отримуємо дозволені дані та коментарі.
+        var details = await queries.GetDetailsAsync(
+            id,
+            context.User,
+            cancellationToken);
+
+        if (details is null)
+        {
+            return Results.Problem(
+                title: "Інцидент не знайдено",
+                statusCode: 404);
+        }
+
+        return Results.Ok(details);
     }
-        private static async Task<IResult> GetSeveritySummaryAsync(
+
+    private static async Task<IResult> GetSeveritySummaryAsync(
         string? status,
         IncidentQueries queries,
         CancellationToken cancellationToken)
     {
         IncidentStatus? parsedStatus = null;
+
         if (status is not null)
         {
             var isKnown = Enum.TryParse<IncidentStatus>(
                 status, ignoreCase: true, out var candidate)
                 && Enum.IsDefined(candidate);
- 
+
             if (!isKnown)
             {
                 return Results.ValidationProblem(
@@ -87,13 +150,14 @@ public static class IncidentEndpoints
                             "Triaged, InProgress, Resolved, Closed."]
                     });
             }
- 
+
             parsedStatus = candidate;
         }
- 
+
         var summary = await queries.GetSeveritySummaryAsync(
-            parsedStatus, cancellationToken);
+            parsedStatus,
+            cancellationToken);
+
         return Results.Ok(summary);
     }
-
 }

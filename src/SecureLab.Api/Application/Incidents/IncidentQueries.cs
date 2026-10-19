@@ -3,6 +3,9 @@ using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
 
+using System.Security.Claims;
+using SecureLab.Api.Application.Authorization;
+
 namespace SecureLab.Api.Application.Incidents;
 
 public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<IncidentQueries> logger)
@@ -16,13 +19,18 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
             [IncidentSeverity.Low] = 3,
         };
 
+
     public async Task<IReadOnlyList<IncidentListItemResponse>> GetListAsync(
         IncidentStatus? status,
+        ClaimsPrincipal user,
         CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incidents with status filter {Status}", status);
 
-        var query = dbContext.Incidents.AsNoTracking();
+
+        var query = IncidentAccess.VisibleTo(
+            dbContext.Incidents.AsNoTracking(),
+            user);
         if (status is not null)
         {
             query = query.Where(incident => incident.Status == status);
@@ -40,12 +48,21 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
             .ToListAsync(cancellationToken);
     }
 
-    public Task<IncidentDetailsResponse?> GetDetailsAsync(Guid id, CancellationToken cancellationToken)
+ 
+    public Task<IncidentDetailsResponse?> GetDetailsAsync(
+        Guid id,
+        ClaimsPrincipal user,
+        CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incident {IncidentId}", id);
 
-        return dbContext.Incidents
-            .AsNoTracking()
+        var showInternal = IncidentAccess.CanSeeInternal(user);
+
+        var query = IncidentAccess.VisibleTo(
+            dbContext.Incidents.AsNoTracking(),
+            user);
+
+        return query
             .Where(incident => incident.Id == id)
             .Select(incident => new IncidentDetailsResponse(
                 incident.Id,
@@ -57,7 +74,8 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 incident.CreatedAtUtc,
                 incident.Owner.DisplayName,
                 incident.Comments
-                    .Where(comment => !comment.IsInternal)
+                    .Where(comment =>
+                        !comment.IsInternal || showInternal)
                     .OrderBy(comment => comment.CreatedAtUtc)
                     .Select(comment => new IncidentCommentResponse(
                         comment.Id,
@@ -67,18 +85,22 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                     .ToList()))
             .SingleOrDefaultAsync(cancellationToken);
     }
-        public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>>
-        GetSeveritySummaryAsync(
-            IncidentStatus? status,
-            CancellationToken cancellationToken)
+
+public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>>
+    GetSeveritySummaryAsync(
+        IncidentStatus? status,
+        CancellationToken cancellationToken)
+{
+    var query = dbContext.Incidents.AsNoTracking();
+
+    if (status is not null)
     {
-        var query = dbContext.Incidents.AsNoTracking();
- 
-        if (status is not null)
-        {
-            query = query.Where(incident => incident.Status == status);
-        }
- 
+        query = query.Where(
+            incident => incident.Status == status);
+    }
+
+
+
 // 1. Завантажуємо наявні групи з бази у словник
     var dbGroups = await query
         .GroupBy(incident => incident.Severity)
