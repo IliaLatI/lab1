@@ -26,7 +26,7 @@ public static class Lab04Endpoints
             .RequireAuthorization()
             .WithName("GetIncidentComment");
 
-        // Тимчасовий локальний сценарій перевірки triage.
+        // Захищений маршрут зміни статусу інциденту.e.
         app.MapPost("/api/incidents/{id:guid}/triage", TriageAsync)
             .RequireAuthorization()
             .WithName("TriageIncident");
@@ -206,13 +206,12 @@ private static async Task<IResult> CommentAsync(
         comment.CreatedAtUtc));
 }
 
-
-// Тимчасова навчальна реалізація для кроку 10.
-// Перевірка ролі тут навмисно відсутня.
+// Виконання привілейованого переходу з перевіркою ролі та поточного статусу.
 private static async Task<IResult> TriageAsync(
     Guid id,
     SecureLabDbContext db,
     HttpContext context,
+    ILogger<Program> logger,
     CancellationToken ct)
 {
     var incident = await db.Incidents
@@ -232,14 +231,36 @@ private static async Task<IResult> TriageAsync(
         return Results.Unauthorized();
     }
 
-    // Навмисно відсутня перевірка IncidentOperation.Triage.
-    // Цю вразливість усунемо в кроці 11.
+    // Перевіряємо роль користувача та право виконання triage.
+    if (!IncidentAccess.Allows(
+        context.User,
+        IncidentOperation.Triage,
+        incident))
+    {
+        Lab04Audit.Denied(logger, context, incident.Id);
+
+        return Results.Problem(
+            title: "Forbidden",
+            statusCode: 403,
+            extensions: new Dictionary<string, object?>
+            {
+                ["traceId"] = System.Diagnostics.Activity.Current?.Id
+                     ?? context.TraceIdentifier
+            });
+    }
 
     if (incident.Status != IncidentStatus.New)
     {
+        Lab04Audit.Denied(logger, context, incident.Id);
+
         return Results.Problem(
             title: "Only New incidents can be triaged",
-            statusCode: 409);
+            statusCode: 409,
+            extensions: new Dictionary<string, object?>
+            {
+                ["traceId"] = System.Diagnostics.Activity.Current?.Id
+                    ?? context.TraceIdentifier
+            });
     }
 
     var oldStatus = incident.Status;
@@ -255,7 +276,7 @@ private static async Task<IResult> TriageAsync(
         ChangedByUserId = actorId.Value,
         OldStatus = oldStatus,
         NewStatus = incident.Status,
-        Note = "Temporary local lab triage PoC.",
+        Note = "Incident triaged by authorized Analyst.",
         CreatedAtUtc = now
     });
 

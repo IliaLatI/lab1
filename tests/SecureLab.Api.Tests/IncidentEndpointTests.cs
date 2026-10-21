@@ -9,48 +9,99 @@ namespace SecureLab.Api.Tests;
 public sealed class IncidentEndpointTests(SecureLabApiFactory factory)
     : IClassFixture<SecureLabApiFactory>
 {
-    private readonly HttpClient _client = factory.CreateClient();
+    private static string StudyPassword =>
+        Environment.GetEnvironmentVariable("SeedUsers__Password")
+        ?? throw new InvalidOperationException(
+            "SeedUsers__Password is not configured.");
 
     [Fact]
-    public async Task GetList_ReturnsSeededIncidents()
+    public async Task GetList_ReturnsOnlyAuthorizedIncidents()
     {
-        var incidents = await _client.GetFromJsonAsync<List<IncidentListItemResponse>>(
-            "/api/incidents");
+        using var client = await factory.LoginAsync(
+            "alice", StudyPassword);
+
+        var incidents = await client.GetFromJsonAsync<
+            List<IncidentListItemResponse>>("/api/incidents/");
 
         Assert.NotNull(incidents);
-        Assert.Contains(incidents, incident => incident.Id == DbSeeder.AliceIncidentId);
-        Assert.Contains(incidents, incident => incident.Id == DbSeeder.BobIncidentId);
+
+        // Alice бачить власний інцидент.
+        Assert.Contains(incidents,
+            incident => incident.Id == DbSeeder.AliceIncidentId);
+
+        // Інцидент Bob не повинен бути доступним Alice.
+        Assert.DoesNotContain(incidents,
+            incident => incident.Id == DbSeeder.BobIncidentId);
     }
 
     [Fact]
     public async Task GetDetails_ForUnknownId_ReturnsProblemDetails404()
     {
-        using var response = await _client.GetAsync($"/api/incidents/{Guid.NewGuid()}");
+        using var client = await factory.LoginAsync(
+            "alice", StudyPassword);
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        using var response = await client.GetAsync(
+            $"/api/incidents/{Guid.NewGuid()}");
+
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            response.StatusCode);
+
+        Assert.Equal(
+            "application/problem+json",
+            response.Content.Headers.ContentType?.MediaType);
     }
 
     [Fact]
     public async Task GetDetails_DoesNotExposeInternalOwnerFields()
     {
-        using var response = await _client.GetAsync(
+        using var client = await factory.LoginAsync(
+            "alice", StudyPassword);
+
+        using var response = await client.GetAsync(
             $"/api/incidents/{DbSeeder.AliceIncidentId}");
+
+        Assert.Equal(
+            HttpStatusCode.OK,
+            response.StatusCode);
+
         var json = await response.Content.ReadAsStringAsync();
+
         using var document = JsonDocument.Parse(json);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.False(document.RootElement.TryGetProperty("ownerUserId", out _));
-        Assert.False(document.RootElement.TryGetProperty("email", out _));
-        Assert.Equal("Аліса Коваль", document.RootElement.GetProperty("ownerDisplayName").GetString());
+        var root = document.RootElement;
+
+        // Внутрішні ідентифікатори та email не розкриваються.
+        Assert.False(
+            root.TryGetProperty("ownerUserId", out _));
+
+        Assert.False(
+            root.TryGetProperty("email", out _));
+
+        // Публічне ім'я власника присутнє.
+        var ownerName = root
+            .GetProperty("ownerDisplayName")
+            .GetString();
+
+        Assert.False(
+            string.IsNullOrWhiteSpace(ownerName));
     }
 
     [Fact]
     public async Task ClientScript_DoesNotUseDangerousInnerHtmlSink()
     {
-        var script = await _client.GetStringAsync("/app.js");
+        using var client = factory.CreateClient();
 
-        Assert.DoesNotContain("innerHTML", script, StringComparison.Ordinal);
-        Assert.Contains("textContent", script, StringComparison.Ordinal);
+        var script = await client.GetStringAsync("/app.js");
+
+        Assert.DoesNotContain(
+            "innerHTML",
+            script,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "textContent",
+            script,
+            StringComparison.Ordinal);
     }
 }

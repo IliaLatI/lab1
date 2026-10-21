@@ -196,7 +196,8 @@ public static class Lab02Endpoints
             return Results.Created(
                 $"/api/incidents/{incident.Id}",
                 response);
-      }).RequireAuthorization();
+      }).RequireAuthorization(policy =>
+         policy.RequireRole("Reporter", "Analyst"));
     }
 }
 
